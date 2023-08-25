@@ -1,5 +1,7 @@
 # Console text colours
 from collections import OrderedDict, deque
+import json
+from pathlib import Path
 from statistics import mean
 from time import perf_counter
 
@@ -34,6 +36,11 @@ class Timer():
         self.end_times[name] = prev_times
         self.indeces[name] = (self.indeces.get(name, 0) + 1) % self.average_of
 
+    def next(self, stop_name, start_name):
+        """Stop a timer and start another one."""
+        self.stop(stop_name)
+        self.start(start_name)
+
     def get_time(self, name):
         return mean(self.end_times[name])
 
@@ -46,22 +53,36 @@ class Timer():
             print(f"{name}: {' ' * (20 - len(name))}{average:.20f}")
         return average
 
+    def sorted_dict(self) -> OrderedDict:
+        items = sorted(self.end_times.items(), key=lambda i: mean(i[1]), reverse=True)
+        return OrderedDict(items)
+
     def print_all(self, accuracy=6, print_sum=False):
         """Print all active timers with formatting.
         Accuracy is the number of decimal places to display"""
         string = ""
-        items = sorted(self.end_times.items(), key=lambda i: mean(i[1]), reverse=True)
-        for i, (k, v) in enumerate(items):
-            if i == 0:
-                color = RED
-            elif i == len(items) - 1:
+        sorted_dict = self.sorted_dict()
+        for i, (k, v) in enumerate(sorted_dict.items()):
+            if i == len(sorted_dict) - 1:
                 color = GREEN
+            elif i == 0:
+                color = RED
             else:
                 color = WHITE
             average = sum(v) if print_sum else mean(v)
             string += f"{color}{k}: {' ' * (20 - len(k))}{average:.{accuracy}f}\n"
         string += WHITE
         print(string)
-        # # if self.indeces[list(self.indeces.keys())[-1]] >= self.average_of - 1:
-        # # else:
-        #     print("ho")
+
+    def export_json(self, file: Path, identifier: str):
+        """Export the average times to a json file"""
+        try:
+            with open(file, "r") as f:
+                data = json.load(f)
+        except (FileExistsError, json.JSONDecodeError):
+            data = OrderedDict()
+
+        data[identifier] = OrderedDict((key, mean(value)) for key, value in self.sorted_dict().items())
+
+        with open(file, "w") as f:
+            json.dump(data, f, indent=2)
