@@ -9,7 +9,9 @@ from bpy.types import Context, Event, Material, Menu, Object, Operator, Panel, U
 from mathutils import Vector
 """A module containing helpers to make defining blender types easier (panels, operators etc.)"""
 
-__all__ = ["BMenu", "BOperator", "BPanel", "BPropertyGroup", "FunctionToOperator"]
+OPERATOR_CATEGORY = "test"  # This is the submodule of bpy.ops that BOperators will be registered to
+
+__all__ = ["BMenu", "BOperator", "BPanel", "BPropertyGroup", "FunctionToOperator", "OPERATOR_CATEGORY"]
 to_register = []
 T = TypeVar("T")
 
@@ -252,7 +254,7 @@ class ExecContext(Enum):
 
 
 @dataclass
-class BOperator():
+class BOperator:
     """A decorator for defining blender Operators that helps to cut down on boilerplate code,
     and adds better functionality for autocomplete.
     To use it, add it as a decorator to the operator class, with whatever arguments you want.
@@ -350,6 +352,11 @@ class BOperator():
 
             cursor = Cursor
 
+            FINISHED = {"FINISHED"}
+            CANCELLED = {"CANCELLED"}
+            PASS_THROUGH = {"PASS_THROUGH"}
+            RUNNING_MODAL = {"RUNNING_MODAL"}
+
             # Set up a description that can be set from the UI draw function
             if decorator.dynamic_description:
                 bl_description: StringProperty(default=op_description, options={"HIDDEN"})
@@ -360,14 +367,20 @@ class BOperator():
                         return props.bl_description
                     else:
                         return op_description
+
             else:
                 bl_description = op_description
 
             @classmethod
             def run(cls, exec_context: ExecContext = None, **kwargs):
                 """Run this operator with the given execution context."""
-                op: Callable = getattr(bpy.ops, cls.bl_idname)
 
+                # Get operator function
+                op: Callable = bpy.ops
+                for part in cls.bl_idname.split("."):
+                    op = getattr(op, part)
+
+                # Execute
                 if exec_context:
                     exec_context = enum_value(exec_context)
                     return op(exec_context, **kwargs)
@@ -404,13 +417,6 @@ class BOperator():
                 for name, value in kwargs.items():
                     setattr(op, name, value)
                 return op
-
-            def __init__(self):
-                # Allow auto-complete for execute function return values
-                self.FINISHED = {"FINISHED"}
-                self.CANCELLED = {"CANCELLED"}
-                self.PASS_THROUGH = {"PASS_THROUGH"}
-                self.RUNNING_MODAL = {"RUNNING_MODAL"}
 
             def call_popup(self, width=300):
                 """Call a popup that shows the parameters of the operator, or a custom draw function.
@@ -481,7 +487,8 @@ class FunctionToOperator():
     """A decorator that takes a function and registers an operator that will call it in the execute function.
     It automatically converts the arguments of the function to operator arguments for basic data types,
     and for blender id types (e.g. Objects etc.), the operator takes the name and then automatically gets the data
-    block to pass to the wrapped function
+    block to pass to the wrapped function.
+    if The category is not passed then the module attribute OPERATOR_CATEGORY will be used instead.
 
     The idname of the operator is just bpy.ops.{category}.{function_name}
     
@@ -491,7 +498,7 @@ class FunctionToOperator():
         category (str): The category that the operator will be placed in.
         label (str): The label to display in the UI"""
 
-    category: str
+    category: str = ""
     label: str = ""
 
     def __call__(self, function):
@@ -517,7 +524,7 @@ class FunctionToOperator():
 
         # Define the new operator
         @BOperator(
-            category=self.category,
+            category=self.category or OPERATOR_CATEGORY,
             idname=function.__name__,
             description=function.__doc__,
             label=label,
