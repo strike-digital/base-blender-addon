@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 from typing import Callable
 
@@ -43,7 +45,7 @@ class HandlerType(Enum):
     PERSISTENT = "persistent"
 
 
-handlers = []
+handlers: list[Handler] = []
 
 
 class Handler:
@@ -138,6 +140,28 @@ class DrawHandler:
 draw_handlers: list[DrawHandler] = []
 
 
+timers: list[Timer] = []
+
+
+class Timer:
+    def run(self):
+        if not self.finished:
+            return self.func()
+
+    def __init__(self, func: Callable, first_interval: float = 0, persistent: bool = False):
+        self.finished = False
+        self.func = func
+        bpy.app.timers.register(self.run, first_interval=first_interval, persistent=persistent)
+        global timers
+        timers.append(self)
+
+    def remove(self):
+        self.finished = True
+
+        global timers
+        timers.remove(self)
+
+
 def unregister():
     """Clean up unremoved handlers"""
     global handlers
@@ -147,3 +171,7 @@ def unregister():
     global draw_handlers
     for handler in draw_handlers:
         handler.remove()
+
+    global timers
+    for timer in timers:
+        timer.remove()
