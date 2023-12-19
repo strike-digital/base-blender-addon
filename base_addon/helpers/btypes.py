@@ -456,10 +456,12 @@ class BOperatorBase(Operator):
         """Wrap the execute function to remove the need to return {"FINISHED"}"""
         self._set_custom_args()
 
-        ret = super().execute(context)
-        if ret is None:
-            return self.FINISHED
-        return ret
+        if hasattr(super(), "execute"):
+            ret = super().execute(context)
+            if ret is None:
+                return self.FINISHED
+            return ret
+        return self.FINISHED
 
 
 @dataclass

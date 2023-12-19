@@ -70,7 +70,8 @@ def main():
 
     # Deal with existing files
     for file in files:
-        if file.exists():
+        dest = destination / file.name
+        if dest.exists():
             print(f"Destination file '{file.name}' already exists:")
             print("(0) Overwrite")
             print("(1) Pass over")
