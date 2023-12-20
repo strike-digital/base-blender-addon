@@ -1,11 +1,29 @@
 import inspect
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Union, Literal, TypeVar
 from dataclasses import dataclass
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
 import bpy
-from bpy.props import IntProperty, BoolProperty, FloatProperty, StringProperty, PointerProperty, FloatVectorProperty
-from bpy.types import Menu, Event, Panel, Object, Context, Material, Operator, UILayout
+from bpy.props import (
+    BoolProperty,
+    FloatProperty,
+    FloatVectorProperty,
+    IntProperty,
+    PointerProperty,
+    StringProperty,
+)
+from bpy.types import (
+    ID,
+    Context,
+    Event,
+    Material,
+    Menu,
+    Object,
+    Operator,
+    Panel,
+    PropertyGroup,
+    UILayout,
+)
 from mathutils import Vector
 
 """A module containing helpers to make defining blender types easier (panels, operators etc.)"""
@@ -205,10 +223,12 @@ class BPanel:
 property_groups = []
 
 
-@dataclass
 class BPropertyGroup:
-    type: bpy.types.ID
-    name: str
+    type = PropertyGroup
+
+    def __init__(self, type: ID, name: str):
+        self.id_type = type
+        self.name = name
 
     def __call__(self, cls):
         self.cls = cls
@@ -217,10 +237,10 @@ class BPropertyGroup:
         return cls
 
     def register(self):
-        setattr(self.type, self.name, PointerProperty(type=self.cls))
+        setattr(self.id_type, self.name, PointerProperty(type=self.cls))
 
     def unregister(self):
-        delattr(self.type, self.name)
+        delattr(self.id_type, self.name)
 
 
 class Cursor(Enum):
