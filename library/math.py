@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import math
+from typing import Any
+
 from mathutils import Vector as V
 
 
@@ -9,6 +13,10 @@ def clamp(value, min=0.0, max=1.0):
     elif value > max:
         value = max
     return value
+
+
+def round_increment(x: float, increment: int) -> int:
+    return increment * round(x / increment)
 
 
 def roundup(x: float, increment: int) -> int:
@@ -59,7 +67,88 @@ def vec_max(a, b) -> V:
     return V(max(e) for e in zip(a, b))
 
 
-class Rectangle():
+def pad_list(a: list, length: int, value: Any = None):
+    """Pad a list with the given value to the given length"""
+    a = list(a)
+    a.extend([value] * (length - len(a)))
+    return a
+
+
+class Line:
+    def __init__(self, start: V = (0, 0), end: V = (0, 0)):
+        self.start = V(start)
+        self.end = V(end)
+
+    def __bool__(self):
+        return bool(self.start.x + self.start.y + self.end.x + self.end.y)
+
+    def __str__(self):
+        return f"Line(({self.start.x}, {self.start.y}), ({self.end.x}, {self.end.y}))"
+
+    def __add__(self, other: V):
+        return Line(self.start + other, self.end + other)
+
+    def __sub__(self, other: V):
+        return Line(self.start - other, self.end - other)
+
+    def __mul__(self, other: V):
+        return Line(self.start * other, self.end * other)
+
+    def __div__(self, other: V):
+        return Line(self.start / other, self.end / other)
+
+    def __iadd__(self, other: V):
+        self.start += other
+        self.end += other
+        return self
+
+    def __isub__(self, other: V):
+        self.start -= other
+        self.end -= other
+        return self
+
+    def __imul__(self, other: V):
+        self.start *= other
+        self.end *= other
+        return self
+
+    def __idiv__(self, other: V):
+        self.start /= other
+        self.end /= other
+        return self
+
+    def __iter__(self):
+        yield self.start
+        yield self.end
+
+    @property
+    def x(self):
+        return self.start.x
+
+    @x.setter
+    def x(self, value: float):
+        self.start.x = value
+        self.end.x = value
+
+    @property
+    def y(self):
+        return self.start.y
+
+    @y.setter
+    def y(self, value: float):
+        self.start.y = value
+        self.end.y = value
+
+    @property
+    def size(self):
+        return self.end - self.start
+
+    @property
+    def length(self):
+        return (self.end - self.start).length
+
+
+class Rectangle:
     """Helper class to represent a rectangle"""
 
     __slots__ = ["min", "max"]
@@ -78,6 +167,14 @@ class Rectangle():
     maxy = property(fget=lambda self: self.max.y)
 
     @property
+    def width(self):
+        return self.max.x - self.min.x
+
+    @property
+    def height(self):
+        return self.max.y - self.min.y
+
+    @property
     def coords(self):
         """Return coordinates for drawing"""
         coords = [
@@ -87,6 +184,10 @@ class Rectangle():
             (self.minx, self.maxy),
         ]
         return coords
+
+    @property
+    def indices(self):
+        return [(0, 1, 2), (0, 2, 3)]
 
     @property
     def size(self):
@@ -119,10 +220,17 @@ class Rectangle():
             value = V((value, value))
         return Rectangle(self.min * value, self.max * value)
 
-    def __add__(self, value):
+    def __add__(self, value) -> Rectangle:
         if not isinstance(value, V):
             value = V((value, value))
         return Rectangle(self.min + value, self.max + value)
+
+    def copy(self):
+        return Rectangle(self.min.copy(), self.max.copy())
+
+    def translate(self, offset: V):
+        self.min += offset
+        self.max += offset
 
     def isinside(self, point) -> bool:
         """Check if a point is inside this rectangle"""
@@ -147,3 +255,14 @@ class Rectangle():
         # prevent min/max overspilling on other side
         self.min = vec_min(self.min, rectangle.max)
         self.max = vec_max(self.max, rectangle.min)
+
+    def combine(self, rectangle: Rectangle):
+        """Combine this rectangle with another rectangle, giving the bounding box of both of them."""
+        self.min = vec_min(self.min, rectangle.min)
+        self.max = vec_max(self.max, rectangle.max)
+
+    def expand(self, amount: float | V):
+        if not isinstance(amount, V):
+            amount = V((amount, amount))
+        self.min -= amount
+        self.max += amount
