@@ -1,7 +1,8 @@
 import inspect
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
+from functools import wraps
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypeVar, Union
 
 import bpy
 from bpy.props import (
@@ -28,11 +29,23 @@ from mathutils import Vector
 
 """A module containing helpers to make defining blender types easier (panels, operators etc.)"""
 
-__all__ = ["BMenu", "BOperator", "BPanel", "BPropertyGroup", "FunctionToOperator"]
+__all__ = ["BMenu", "BOperator", "BPanel", "BPropertyGroup", "FunctionToOperator", "CustomProperty", "configure"]
 to_register = []
 T = TypeVar("T")
 
 
+# CONFIG
+class Config:
+    addon_acronym: str = ""
+
+
+def configure(addon_acronym: str = ""):
+    """Configure btypes settings for this addon, should usually be called in the root init file.
+    Make sure it is called before auto_load.init() in order for the configuration to apply before registration."""
+    Config.addon_acronym = addon_acronym
+
+
+# UTILS
 def enum_value(enum_or_value: Enum | T):
     """If value is an enum item, return enum value, else return value"""
     if isinstance(enum_or_value, Enum):
@@ -40,6 +53,116 @@ def enum_value(enum_or_value: Enum | T):
     return enum_or_value
 
 
+# ENUMS
+
+
+class Cursor(Enum):
+    """Wraps the poorly documented blender cursor functions to allow for auto-complete"""
+
+    DEFAULT = "DEFAULT"
+    NONE = "NONE"
+    WAIT = "WAIT"
+    CROSSHAIR = "CROSSHAIR"
+    MOVE_X = "MOVE_X"
+    MOVE_Y = "MOVE_Y"
+    KNIFE = "KNIFE"
+    TEXT = "TEXT"
+    PAINT_BRUSH = "PAINT_BRUSH"
+    PAINT_CROSS = "PAINT_CROSS"
+    DOT = "DOT"
+    ERASER = "ERASER"
+    HAND = "HAND"
+    SCROLL_X = "SCROLL_X"
+    SCROLL_Y = "SCROLL_Y"
+    SCROLL_XY = "SCROLL_XY"
+    EYEDROPPER = "EYEDROPPER"
+    PICK_AREA = "PICK_AREA"
+    STOP = "STOP"
+    COPY = "COPY"
+    CROSS = "CROSS"
+    MUTE = "MUTE"
+    ZOOM_IN = "ZOOM_IN"
+    ZOOM_OUT = "ZOOM_OUT"
+
+    @classmethod
+    def set_icon(cls, value: str):
+        if isinstance(value, Enum):
+            value = value.name
+        bpy.context.window.cursor_modal_set(str(value))
+
+    @classmethod
+    def reset_icon(cls):
+        bpy.context.window.cursor_modal_set("DEFAULT")
+
+    @classmethod
+    def set_location(cls, location: tuple):
+        bpy.context.window.cursor_warp(location[0], location[1])
+
+
+class ExecContext(Enum):
+    """Operator execution contexts"""
+
+    INVOKE = "INVOKE_DEFAULT"
+    EXEC = "EXECUTE_DEFAULT"
+
+    INVOKE_SCREEN = "INVOKE_SCREEN"
+    INVOKE_AREA = "INVOKE_AREA"
+    INVOKE_REGION_PREVIEW = "INVOKE_REGION_PREVIEW"
+    INVOKE_REGION_CHANNELS = "INVOKE_REGION_CHANNELS"
+    INVOKE_REGION_WIN = "INVOKE_REGION_WIN"
+    EXEC_REGION_WIN = "EXEC_REGION_WIN"
+    EXEC_REGION_CHANNELS = "EXEC_REGION_CHANNELS"
+    EXEC_REGION_PREVIEW = "EXEC_REGION_PREVIEW"
+    EXEC_AREA = "EXEC_AREA"
+    EXEC_SCREEN = "EXEC_SCREEN"
+
+
+class BPoll:
+    """Presets for common poll functions
+    All functions starting with `is_` are poll functions.
+    Other functions can be used to modify and combine poll functions.
+    ```
+    class MyOperator:
+        poll = BPoll.is_x
+        # or
+        poll = BPoll.both(BPoll.is_x, BPoll.is_y)
+        # or
+        poll = BPoll.both(BPoll.inverse(BPoll.is_x), BPoll.is_y)
+    ```
+    
+    Eventually it's probably easier to just write your own poll function,
+    but these can still be used as building blocks"""
+
+    def inverse(f: Callable):
+        """Return the inverse of the provided poll function. Equivalent to the `not` keyword"""
+        return classmethod(lambda cls, context: not f(context))
+
+    def both(f1: Callable, f2: Callable):
+        """Combine two poll functions. Equivalent to the `and` keyword"""
+        return classmethod(lambda cls, context: f1(context) and f2(context))
+
+    def neither(f1: Callable, f2: Callable):
+        """Return if both poll functions are False. Equivalent to `not f1 and not f2`"""
+        return classmethod(lambda cls, context: not f1(context) and not f2(context))
+
+    @classmethod
+    def is_node_editor(cls, context: Context, tree_type=None):
+        if context.area.type != "NODE_EDITOR":
+            return False
+        if tree_type:
+            return context.space_data.tree_type == tree_type
+        return True
+
+    @classmethod
+    def is_geometry_node_editor(cls, context: Context):
+        return cls.is_node_editor(context, tree_type="GeometryNodeTree")
+
+    @classmethod
+    def is_active_node_tree(cls, context: Context):
+        return cls.is_node_editor(context) and bool(context.space_data.node_tree)
+
+
+# TYPES
 @dataclass
 class BMenu:
     """A decorator for defining blender menus that helps to cut down on boilerplate code,
@@ -91,7 +214,8 @@ class BMenu:
 
 @dataclass
 class BPanel:
-    """A decorator for defining blender Panels that helps to cut down on boilerplate code,
+    """
+    A decorator for defining blender Panels that helps to cut down on boilerplate code,
     and adds better functionality for autocomplete.
     To use it, add it as a decorator to the panel class, with whatever arguments you want.
     The only required arguments are the space and region types,
@@ -222,86 +346,40 @@ class BPanel:
 
 property_groups = []
 
+PropertyGroupClass = TypeVar("PropertyGroupClass", bound=PropertyGroup)
+
+
+class BPropertyGroupBase(PropertyGroup):
+    pass
+
 
 class BPropertyGroup:
-    type = PropertyGroup
+    type = BPropertyGroupBase
 
-    def __init__(self, type: ID, name: str):
-        self.id_type = type
+    def __init__(self, id_type: ID, name: str):
+        self.id_type = id_type
         self.name = name
 
-    def __call__(self, cls):
+    def __call__(self, cls: PropertyGroupClass) -> PropertyGroupClass:
         self.cls = cls
         global property_groups
         property_groups.append(self)
-        return cls
+
+        class Wrapped(cls, BPropertyGroupBase):
+            pass
+
+        self.wrapped_cls = Wrapped
+        return self.wrapped_cls
 
     def register(self):
-        setattr(self.id_type, self.name, PointerProperty(type=self.cls))
+        try:
+            bpy.utils.register_class(self.wrapped_cls)
+        except ValueError:
+            pass
+        setattr(self.id_type, self.name, PointerProperty(type=self.wrapped_cls))
 
     def unregister(self):
         delattr(self.id_type, self.name)
-
-
-class Cursor(Enum):
-    """Wraps the poorly documented blender cursor functions to allow for auto-complete"""
-
-    DEFAULT = "DEFAULT"
-    NONE = "NONE"
-    WAIT = "WAIT"
-    CROSSHAIR = "CROSSHAIR"
-    MOVE_X = "MOVE_X"
-    MOVE_Y = "MOVE_Y"
-    KNIFE = "KNIFE"
-    TEXT = "TEXT"
-    PAINT_BRUSH = "PAINT_BRUSH"
-    PAINT_CROSS = "PAINT_CROSS"
-    DOT = "DOT"
-    ERASER = "ERASER"
-    HAND = "HAND"
-    SCROLL_X = "SCROLL_X"
-    SCROLL_Y = "SCROLL_Y"
-    SCROLL_XY = "SCROLL_XY"
-    EYEDROPPER = "EYEDROPPER"
-    PICK_AREA = "PICK_AREA"
-    STOP = "STOP"
-    COPY = "COPY"
-    CROSS = "CROSS"
-    MUTE = "MUTE"
-    ZOOM_IN = "ZOOM_IN"
-    ZOOM_OUT = "ZOOM_OUT"
-
-    @classmethod
-    def set_icon(cls, value: str):
-        if isinstance(value, Enum):
-            value = value.name
-        bpy.context.window.cursor_modal_set(str(value))
-
-    @classmethod
-    def reset_icon(cls):
-        bpy.context.window.cursor_modal_set("DEFAULT")
-
-    @classmethod
-    def set_location(cls, location: tuple):
-        bpy.context.window.cursor_warp(location[0], location[1])
-
-
-class ExecContext(Enum):
-    """Operator execution contexts"""
-
-    INVOKE = "INVOKE_DEFAULT"
-    EXEC = "EXECUTE_DEFAULT"
-
-    INVOKE_SCREEN = "INVOKE_SCREEN"
-    INVOKE_AREA = "INVOKE_AREA"
-    INVOKE_REGION_PREVIEW = "INVOKE_REGION_PREVIEW"
-    INVOKE_REGION_CHANNELS = "INVOKE_REGION_CHANNELS"
-    INVOKE_REGION_WIN = "INVOKE_REGION_WIN"
-    EXEC_REGION_WIN = "EXEC_REGION_WIN"
-    EXEC_REGION_CHANNELS = "EXEC_REGION_CHANNELS"
-    EXEC_REGION_PREVIEW = "EXEC_REGION_PREVIEW"
-    EXEC_AREA = "EXEC_AREA"
-    EXEC_SCREEN = "EXEC_SCREEN"
 
 
 @dataclass
@@ -311,7 +389,7 @@ class CustomPropertyType:
     type: Any
 
 
-def CustomProperty(type: T, description: str):
+def CustomProperty(type: T, description: str) -> T:
     """Define a custom property on an operator (in the same way as bpy.props).
     You'll only be able to use this property as an argument for the operator when using the
     BOperator.run() function, otherwise you'll get an error."""
@@ -490,12 +568,14 @@ class BOperator:
     and adds better functionality for autocomplete.
     To use it, add it as a decorator to the operator class, with whatever arguments you want.
     To get type hinting for it's extra functions, the class should inherit from BOperator.type instead of Operator
-    The only required argument is the category of the operator,
+    The category of the operator is required if the addon acronym has not been set.
     and the rest can be inferred from the class name and __doc__.
     This works best for operators that use the naming convension ADDON_NAME_OT_operator_name.
 
     Args:
         category (str): The first part of the name used to call the operator (e.g. "object" in "object.select_all").
+            This is optional if the addon_acronym property has been configured in the init file,
+            otherwise this will raise a ValueError if no value is given.
         idname (str): The second part of the name used to call the operator (e.g. "select_all" in "object.select_all")
         label (str): The name of the operator that is displayed in the UI.
         description (str): The description of the operator that is displayed in the UI.
@@ -513,7 +593,7 @@ class BOperator:
         macro (bool): Use to check if an operator is a macro.
     """
 
-    category: str
+    category: str = ""
     idname: str = ""
     label: str = ""
     description: str = ""
@@ -538,8 +618,22 @@ class BOperator:
     def __call__(decorator, cls: OperatorClass) -> Union[OperatorClass, BOperatorBase]:
         """This takes the decorated class and populate's the bl_ attributes with either the supplied values,
         or a best guess based on the other values"""
+
+        # Get the first part of the idname
+        if decorator.category:
+            category = decorator.category
+        else:
+            if not Config.addon_acronym:
+                raise ValueError(
+                    f"No category provided for BOperator {cls.__name__}, \
+                    and the addon acronym has not been set with the btypes.configure function in the init file".replace(
+                        "  ", ""
+                    )
+                )
+            category = Config.addon_acronym
+
         cls_name_end = cls.__name__.split("OT_")[-1]
-        idname = f"{decorator.category}." + (decorator.idname or cls_name_end)
+        idname = f"{category}." + (decorator.idname or cls_name_end)
         label = decorator.label or cls_name_end.replace("_", " ").title()
 
         if decorator.description:
