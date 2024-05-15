@@ -22,7 +22,7 @@ def main():
     lib_files = {f.name: f for f in library_dir.rglob("**/*.py") if f.is_file()}
 
     if file.name in lib_files:
-        if input(f"File {file.name} already exists in library at {lib_files[file.name].relative_to(library_dir)}, update? (y/n)") != "y":
+        if input(f"File {file.name} already exists in library at {lib_files[file.name].relative_to(library_dir)}, update? (y/n)\n") != "y":
             print("Exiting")
             return
         

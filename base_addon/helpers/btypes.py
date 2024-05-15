@@ -24,6 +24,8 @@ from bpy.types import (
     Panel,
     PropertyGroup,
     UILayout,
+    Area,
+    NodeTree
 )
 from mathutils import Vector
 
@@ -117,59 +119,100 @@ class ExecContext(Enum):
     EXEC_SCREEN = "EXEC_SCREEN"
 
 
+def _unwrap_method(func: classmethod):
+    """Convert a classmethod to a plain function"""
+    return func.__func__ if hasattr(func, "__func__") else func
+
+
 class BPoll:
     """Presets for common poll functions
-    All functions starting with `is_` are poll functions.
+    All functions starting with `poll_` are poll functions.
     Other functions can be used to modify and combine poll functions.
     ```
     class MyOperator:
-        poll = BPoll.is_x
+        poll = BPoll.poll_x
         # or
-        poll = BPoll.both(BPoll.is_x, BPoll.is_y)
+        poll = BPoll.both(BPoll.poll_x, BPoll.poll_y)
         # or
-        poll = BPoll.both(BPoll.inverse(BPoll.is_x), BPoll.is_y)
+        poll = BPoll.both(BPoll.inverse(BPoll.poll_x), BPoll.poll_y)
     ```
-    
+
     Eventually it's probably easier to just write your own poll function,
     but these can still be used as building blocks"""
 
-    def inverse(f: Callable):
+    def _unwrap_classmethod_args(func):
+        """Convert all provided function arguments that are classmethods into normal functions
+        This is needed for the operation functions so they can be called from within eachother.
+        It's a stupid amount of complexity for such a simple feature, but it is nice that it works."""
+
+        @wraps(func)
+        def wrapped_func(*args, **kwargs):
+            args = list(args)
+            for i, arg in enumerate(args):
+                args[i] = _unwrap_method(arg)
+            for name, kwarg in kwargs:
+                kwargs[name] = _unwrap_method(kwarg)
+            return func(*args, **kwargs)
+
+        return wrapped_func
+
+    @_unwrap_classmethod_args
+    def inverse(f: Callable) -> classmethod:
         """Return the inverse of the provided poll function. Equivalent to the `not` keyword"""
-        return classmethod(lambda cls, context: not f(context))
+        return classmethod(lambda cls, context: not f(cls, context))
 
-    def both(f1: Callable, f2: Callable):
+    @_unwrap_classmethod_args
+    def both(f1: Callable, f2: Callable) -> classmethod:
         """Combine two poll functions. Equivalent to the `and` keyword"""
-        return classmethod(lambda cls, context: f1(context) and f2(context))
+        # return classmethod(lambda cls, context: f1(context) and _unwrap_method(f2)(cls, context))
+        return classmethod(lambda cls, context: f1(cls, context) and f2(cls, context))
 
-    def neither(f1: Callable, f2: Callable):
+    @_unwrap_classmethod_args
+    def neither(f1: Callable, f2: Callable) -> classmethod:
         """Return if both poll functions are False. Equivalent to `not f1 and not f2`"""
-        return classmethod(lambda cls, context: not f1(context) and not f2(context))
+        return classmethod(lambda cls, context: not f1(cls, context) and not f2(cls, context))
 
     @classmethod
-    def is_node_editor(cls, context: Context, tree_type=None):
+    def poll_node_editor(cls, context: Context, tree_type=None) -> Area:
         if context.area.type != "NODE_EDITOR":
-            return False
+            return None
         if tree_type:
-            return context.space_data.tree_type == tree_type
-        return True
+            return context.area if context.space_data.tree_type == tree_type else None
+        return context.area
 
     @classmethod
-    def is_geometry_node_editor(cls, context: Context):
-        return cls.is_node_editor(context, tree_type="GeometryNodeTree")
+    def poll_geometry_node_editor(cls, context: Context) -> Area:
+        return BPoll.poll_node_editor(context, tree_type="GeometryNodeTree")
 
     @classmethod
-    def is_active_node_tree(cls, context: Context):
-        return cls.is_node_editor(context) and bool(context.space_data.node_tree)
+    def poll_shader_node_editor(cls, context: Context) -> Area:
+        return BPoll.poll_node_editor(context, tree_type="ShaderNodeTree")
+
+    @classmethod
+    def poll_compositor_node_editor(cls, context: Context) -> Area:
+        return BPoll.poll_node_editor(context, tree_type="CompositorNodeTree")
+
+    @classmethod
+    def poll_active_node_tree(cls, context: Context) -> NodeTree:
+        if BPoll.poll_node_editor(context) and context.space_data.node_tree:
+            return context.space_data.node_tree
 
 
 # TYPES
 @dataclass
 class BMenu:
-    """A decorator for defining blender menus that helps to cut down on boilerplate code,
+    """
+    A decorator for defining blender menus that helps to cut down on boilerplate code,
     and adds better functionality for autocomplete.
     To use it, add it as a decorator to the menu class, with whatever arguments you want.
     all of the arguments are optional, as they can all be inferred from the class name and __doc__.
     This works best for menus that use the naming convension ADDON_NAME_MT_menu_name.
+
+    ```
+    @BMenu()
+    class ADDON_MT_my_menu(BMenu.type):
+        pass
+    ```
 
     Args:
         label (str): The name of the menu that is displayed when it is drawn in the UI.
@@ -180,6 +223,8 @@ class BMenu:
     label: str = ""
     description: str = ""
     idname: str = ""
+
+    type = Menu
 
     def __call__(self, cls):
         """This takes the decorated class and populate's the bl_ attributes with either the supplied values,
@@ -221,6 +266,13 @@ class BPanel:
     The only required arguments are the space and region types,
     and the rest can be inferred from the class name and __doc__.
     This works best for panels that use the naming convension ADDON_NAME_PT_panel_name.
+
+    Simplest example:
+    ```
+    @BPanel("VIEW_3D")
+    class ADDON_MT_my_panel(BPanel.type):
+        pass
+    ```
 
     Args:
         space_type (str): The type of editor to draw this panel in (e.g. VIEW_3D, NODE_EDITOR, etc.)
@@ -276,7 +328,7 @@ class BPanel:
         "EXECUTE",
         "TOOL_HEADER",
         "XR",
-    ]
+    ] = "UI"
     category: str = ""
     label: str = ""
     description: str = ""
@@ -288,6 +340,8 @@ class BPanel:
     show_header: bool = True
     default_closed: bool = False
     header_button_expand: bool = False
+
+    type = Menu
 
     def __call__(self, cls):
         """This takes the decorated class and populate's the bl_ attributes with either the supplied values,
@@ -390,7 +444,10 @@ class CustomPropertyType:
 
 
 def CustomProperty(type: T, description: str) -> T:
-    """Define a custom property on an operator (in the same way as bpy.props).
+    """Define a custom property on an operator, in the same way as bpy.props:
+    ```
+    my_property: CustomProperty(type=bpy.types.Object, description="My property")
+    ```
     You'll only be able to use this property as an argument for the operator when using the
     BOperator.run() function, otherwise you'll get an error."""
     if TYPE_CHECKING:
@@ -545,6 +602,13 @@ class BOperatorBase(Operator):
         else:
             return self.execute(context)
 
+    def draw(self, context: Context):
+        """Wrap the draw function to add a default layout"""
+        if hasattr(super(), "draw"):
+            super().draw(context)
+        else:
+            self.layout.label(text="This is my awesome operator.")
+
     def modal(self, context: Context, event: Event):
         """Wrap the modal function so we can set some initial attributes"""
         self.set_event_attrs(event)
@@ -571,6 +635,14 @@ class BOperator:
     The category of the operator is required if the addon acronym has not been set.
     and the rest can be inferred from the class name and __doc__.
     This works best for operators that use the naming convension ADDON_NAME_OT_operator_name.
+
+    ```
+    # Minimal example
+    @BOperator("addon")
+    class ADDON_OT_my_operator(BOperator.type):
+        def execute(self, context):
+            print("My operator!")
+    ```
 
     Args:
         category (str): The first part of the name used to call the operator (e.g. "object" in "object.select_all").

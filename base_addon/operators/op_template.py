@@ -2,7 +2,7 @@ from bpy.types import Context
 from ..helpers.btypes import BOperator
 
 
-@BOperator("test")
+@BOperator()
 class TEST_OT_test_op(BOperator.type):
     """Testing!"""
 

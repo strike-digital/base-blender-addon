@@ -23,8 +23,10 @@ bl_info = {
     "category": "3D View",
 }
 
+from .helpers import btypes
 from . import auto_load
 
+btypes.configure(addon_acronym="test")
 auto_load.init()
 
 
