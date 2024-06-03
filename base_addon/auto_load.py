@@ -1,9 +1,12 @@
-import bpy
-import typing
+import importlib
 import inspect
 import pkgutil
-import importlib
+import traceback
+import typing
 from pathlib import Path
+from time import perf_counter
+
+import bpy
 
 __all__ = (
     "init",
@@ -35,20 +38,32 @@ def register():
 
     # Custom attributes to prevent registering, and to enable proper registration order
     for cls in ordered_classes.copy():
-        if (hasattr(cls, "__no_reg__") and cls.__no_reg__):
+        if hasattr(cls, "__no_reg__") and cls.__no_reg__:
             ordered_classes.remove(cls)
 
     for cls in ordered_classes:
-        bpy.utils.register_class(cls)
+        # Unregister if error
+        try:
+            bpy.utils.register_class(cls)
+        except Exception as e:
+            unregister()
+            raise e
 
     for module in modules.copy():
         if hasattr(module, "register"):
-            module.register()
+            try:
+                module.register()
+            except Exception as e:
+                unregister()
+                raise e
 
 
 def unregister():
     for cls in reversed(ordered_classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError as e:
+            print(traceback.format_exc(e))
 
     for module in modules:
         if hasattr(module, "unregister"):
@@ -65,7 +80,9 @@ def get_all_submodules(directory):
 
 def iter_submodules(path, package_name):
     for name in sorted(iter_submodule_names(path)):
+        start = perf_counter()
         yield importlib.import_module("." + name, package_name)
+        # print(f"Importing {name} took {perf_counter()-start:.5f}")
 
 
 def iter_submodule_names(path, root=""):
@@ -123,7 +140,7 @@ def get_dependency_from_annotation(value):
 
 
 def iter_my_deps_from_parent_id(cls, my_classes_by_idname):
-    if bpy.types.Panel in cls.__bases__:
+    if issubclass(cls, bpy.types.Panel):
         parent_idname = getattr(cls, "bl_parent_id", None)
         if parent_idname is not None:
             parent_cls = my_classes_by_idname.get(parent_idname)
@@ -134,7 +151,7 @@ def iter_my_deps_from_parent_id(cls, my_classes_by_idname):
 def iter_my_classes(modules):
     base_types = get_register_base_types()
     for cls in get_classes_in_modules(modules):
-        if any(base in base_types for base in cls.__bases__):
+        if any(issubclass(cls, base) for base in base_types):
             if not getattr(cls, "is_registered", False):
                 yield cls
 
@@ -155,7 +172,8 @@ def iter_classes_in_module(module):
 
 def get_register_base_types():
     return set(
-        getattr(bpy.types, name) for name in [
+        getattr(bpy.types, name)
+        for name in [
             "Panel",
             "Operator",
             "PropertyGroup",
@@ -169,7 +187,8 @@ def get_register_base_types():
             "RenderEngine",
             "Gizmo",
             "GizmoGroup",
-        ])
+        ]
+    )
 
 
 # Find order to register to solve dependencies

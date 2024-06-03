@@ -1,10 +1,12 @@
+from typing import Literal
+
 from bpy.props import StringProperty
 
 from ..base_addon.helpers.btypes import BOperator, ExecContext
 from .main_thread import run_in_main_thread
 
 
-@BOperator("asset_bridge")
+@BOperator()
 class AB_OT_report_message(BOperator.type):
     """Report a message at the bottom of the screen, and in the info editor.
     Useful for threads and scripts that aren't being executed inside operators"""
@@ -28,7 +30,11 @@ class AB_OT_report_message(BOperator.type):
         return self.FINISHED
 
 
-def report_message(severity="INFO", message="Message!", main_thread=False):
+def report_message(
+    severity: Literal["INFO"] | Literal["ERROR"] | Literal["WARNING"] = "INFO",
+    message="Message!",
+    main_thread=False,
+):
     if main_thread:
         run_in_main_thread(report_message, (severity, message, False))
     else:
