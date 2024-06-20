@@ -113,7 +113,7 @@ class Cursor(Enum):
         bpy.context.window.cursor_warp(location[0], location[1])
 
 
-class ExecContext(Enum):
+class ExecContext:
     """Operator execution contexts"""
 
     INVOKE = "INVOKE_DEFAULT"
@@ -132,6 +132,22 @@ class ExecContext(Enum):
     EXEC_REGION_PREVIEW = "EXEC_REGION_PREVIEW"
     EXEC_AREA = "EXEC_AREA"
     EXEC_SCREEN = "EXEC_SCREEN"
+
+
+class BDict(dict):
+    """Used to mimic the behavior of the built in Collection Properties in Blender, which act as a
+    mix of dictionaries and lists."""
+
+    def get(key: str, default=None) -> T:
+        pass
+
+    def __iter__(self):
+        return iter(self.values())
+
+    def __getitem__(self, __key: Any) -> Any:
+        if isinstance(__key, int):
+            return list(self.values())[__key]
+        return super().__getitem__(__key)
 
 
 def _unwrap_method(func: classmethod):
@@ -427,7 +443,12 @@ class BPropertyGroupBase(PropertyGroup):
     @property
     def parent(self):
         """Get the parent instance of this property group"""
-        parts = self.path_from_id().split(".")[:-1]
+        try:
+            path = self.path_from_id()
+        except ValueError:
+            # The object has been removed
+            return None
+        parts = path.split(".")[:-1]
         parent = self.id_data
         for part in parts:
             # Special case for collections that require indices to access
@@ -444,6 +465,7 @@ class BPropertyGroupBase(PropertyGroup):
         return parent
 
     def copy_settings_to(self, other: PropertyGroup, recursive=False):
+        """Copy the attributes of this property group to another one."""
         for name in self.keys():
             attr = getattr(self, name)
 
@@ -577,7 +599,6 @@ class BOperatorBase(Operator):
 
         # Execute
         if exec_context:
-            exec_context = enum_value(exec_context)
             return op(exec_context, **kwargs)
         else:
             return op(**kwargs)
@@ -598,7 +619,7 @@ class BOperatorBase(Operator):
     ) -> OperatorClass:
         """Draw this operator as a button in a provided layout.
         All extra keyword arguments are set as arguments for the operator."""
-        layout.operator_context = enum_value(exec_context)
+        layout.operator_context = exec_context
         op = layout.operator(
             cls.bl_idname,
             text=text if isinstance(text, str) else cls.bl_label,

@@ -28,7 +28,7 @@ def main():
         
         destination = lib_files[file.name]
     else:
-        destination = library_dir / file.name
+        destination = library_dir / "library" / file.name
 
     if destination.exists():
         os.remove(destination)
