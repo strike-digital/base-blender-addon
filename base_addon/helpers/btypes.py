@@ -2,7 +2,7 @@ import inspect
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Literal, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar, Union
 
 import bpy
 from bpy.props import (
@@ -457,7 +457,7 @@ class BPropertyGroupBase(PropertyGroup):
                 index = subparts[1][:-1]
                 if index.replace("-", "").isdigit():
                     index = int(index)
-                elif index.startswith("\"") or index.startswith("'"):
+                elif index.startswith('"') or index.startswith("'"):
                     index = index[1:-1]
                 parent = getattr(parent, subparts[0])[index]
                 continue
@@ -470,9 +470,7 @@ class BPropertyGroupBase(PropertyGroup):
             attr = getattr(self, name)
 
             # Special case for collection properties
-            if issubclass(type(attr), bpy_prop_collection):
-                if not recursive:
-                    continue
+            if recursive and issubclass(type(attr), bpy_prop_collection):
                 other_collection = getattr(other, name)
                 for item in attr:
                     other_item = other_collection.add()
@@ -544,7 +542,7 @@ def CustomProperty(type: T, description: str) -> T:
 OperatorClass = TypeVar("OperatorClass", bound=Operator)
 
 
-class BOperatorBase(Operator):
+class BOperatorBase(Operator, Generic[OperatorClass]):
     """The base operator class used by the @BOperator decorator."""
 
     bl_idname: str
@@ -605,7 +603,7 @@ class BOperatorBase(Operator):
 
     @classmethod
     def draw_button(
-        cls: OperatorClass,
+        cls,
         layout: UILayout,
         text=None,
         icon="NONE",
@@ -618,7 +616,8 @@ class BOperatorBase(Operator):
         **kwargs,
     ) -> OperatorClass:
         """Draw this operator as a button in a provided layout.
-        All extra keyword arguments are set as arguments for the operator."""
+        All extra keyword arguments are set as arguments for the operator.
+        The operator object is also returned, so for type hinting set the attributes on that."""
         layout.operator_context = exec_context
         op = layout.operator(
             cls.bl_idname,
@@ -784,7 +783,9 @@ class BOperator:
     else:
         type = Operator
 
-    def __call__(decorator, cls: OperatorClass) -> Union[OperatorClass, BOperatorBase]:
+    # def __call__(decorator, cls: OperatorClass) -> Union[OperatorClass, BOperatorBase]:
+    # The amount of time put into these type hints is not funny. And it looks so simple smh.
+    def __call__(decorator, cls: T) -> Union[T, BOperatorBase[T]]:
         """This takes the decorated class and populate's the bl_ attributes with either the supplied values,
         or a best guess based on the other values"""
 

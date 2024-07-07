@@ -5,7 +5,7 @@ import blf
 from bpy.props import IntProperty, BoolProperty, StringProperty
 from bpy.types import Context, UILayout
 
-from ..helpers.btypes import BOperator
+from ..base_addon.helpers.btypes import BOperator
 
 
 def wrap_text(

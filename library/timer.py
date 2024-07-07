@@ -11,11 +11,11 @@ GREEN = '\033[92m'
 
 
 class Timer():
-    """Class that allows easier timing of often repeaded sections of code.
+    """Class that allows easier timing of often repeated sections of code.
     This is by no means especially smart, but I couldn't find anything similar
     that is as easy to use."""
 
-    __slots__ = ["start_times", "end_times", "indeces", "average_of"]
+    __slots__ = ["start_times", "end_times", "indices", "average_of"]
 
     def __init__(self, average_of=200):
         self.start_times = {}

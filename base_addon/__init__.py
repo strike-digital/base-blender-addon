@@ -11,22 +11,22 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-bl_info = {
-    "name": "BASE_ADDON",
-    "author": "Andrew Stevenson",
-    "description": "TEMP_DESCRIPTION",
-    "blender": (3, 2, 0),
-    "version": (2, 1, 2),
-    "location": "LOCATION",
-    "warning": "",
-    "doc_url": "",
-    "category": "3D View",
-}
+# bl_info = {
+#     "name": "BASE_ADDON",
+#     "author": "Andrew Stevenson",
+#     "description": "TEMP_DESCRIPTION",
+#     "blender": (3, 2, 0),
+#     "version": (2, 1, 2),
+#     "location": "LOCATION",
+#     "warning": "",
+#     "doc_url": "",
+#     "category": "3D View",
+# }
 
-from .helpers import btypes
 from . import auto_load
+from .helpers import btypes
 
-btypes.configure(addon_acronym="test")
+btypes.configure(addon_string="test")
 auto_load.init()
 
 
