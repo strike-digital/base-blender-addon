@@ -1,8 +1,9 @@
+from collections import OrderedDict
 import inspect
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Generic, Iterator, Literal, MutableMapping, TypeVar, Union
 
 import bpy
 from bpy.props import (
@@ -44,6 +45,8 @@ __all__ = [
 ]
 to_register = []
 T = TypeVar("T")
+KT = TypeVar("KT")
+VT = TypeVar("VT")
 
 
 # CONFIG
@@ -134,17 +137,14 @@ class ExecContext:
     EXEC_SCREEN = "EXEC_SCREEN"
 
 
-class BDict(dict):
+class BDict(OrderedDict, MutableMapping[str, VT]):
     """Used to mimic the behavior of the built in Collection Properties in Blender, which act as a
     mix of dictionaries and lists."""
 
-    def get(key: str, default=None) -> T:
-        pass
-
-    def __iter__(self):
+    def __iter__(self) -> Iterator[VT]:
         return iter(self.values())
 
-    def __getitem__(self, __key: Any) -> Any:
+    def __getitem__(self, __key: str) -> VT:
         if isinstance(__key, int):
             return list(self.values())[__key]
         return super().__getitem__(__key)
@@ -398,7 +398,7 @@ class BPanel:
         options = {
             "DEFAULT_CLOSED": self.default_closed,
             "HIDE_HEADER": not self.show_header,
-            "HEADER_BUTTON_EXPAND": self.header_button_expand,
+            "HEADER_LAYOUT_EXPAND": self.header_button_expand,
         }
 
         options = {k for k, v in options.items() if v}
