@@ -1,9 +1,24 @@
-from collections import OrderedDict
+import importlib
 import inspect
+import pkgutil
+import typing
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Generic, Iterator, Literal, MutableMapping, TypeVar, Union
+from pathlib import Path
+from types import ModuleType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Iterator,
+    Literal,
+    MutableMapping,
+    TypeVar,
+    Union,
+)
 
 import bpy
 from bpy.props import (
@@ -28,10 +43,12 @@ from bpy.types import (
     PropertyGroup,
     UILayout,
     bpy_prop_collection,
+    bpy_struct,
 )
 from mathutils import Vector
 
-"""A module containing helpers to make defining blender types easier (panels, operators etc.)"""
+"""A module containing helpers to make defining blender types easier (panels, operators etc.)
+Optionally also allows for automatically registering decorated classes, in the correct order."""
 
 __all__ = [
     "BMenu",
@@ -42,8 +59,9 @@ __all__ = [
     "FunctionToOperator",
     "CustomProperty",
     "configure",
+    "register",
+    "unregister",
 ]
-to_register = []
 T = TypeVar("T")
 KT = TypeVar("KT")
 VT = TypeVar("VT")
@@ -52,14 +70,59 @@ VT = TypeVar("VT")
 # CONFIG
 class Config:
     addon_string: str = ""
+    register: bool = False
+
+    all_modules: list[ModuleType] = []
+    register_list: list[bpy_struct] = []
 
 
-def configure(addon_string: str = ""):
+def configure(addon_string: str = "", auto_register: bool = False):
     """Configure btypes settings for this addon, should usually be called in the root init file.
+    This must be called in the root init file.
     Make sure it is called before auto_load.init() in order for the configuration to apply before registration.
 
-    addon_string: The name of the addon. Used to set the subpath of operators e.g. `bpy.ops.addon_string.op`"""
+    addon_string: The name of the addon. Used to set the subpath of operators e.g. `bpy.ops.addon_string.op`
+    auto_register: Whether to automatically register classes created using btypes decorators."""
     Config.addon_string = addon_string
+    Config.register = auto_register
+    if auto_register:
+        Config.all_modules = _get_modules()
+
+
+def _get_modules() -> list[ModuleType]:
+    """Get the list of modules in the addon using btypes"""
+
+    def get_module_names(path: Path, root: str = ""):
+        """Recursively get a list of all module names in a path"""
+        module_names = []
+        for _, module_name, is_pkg in pkgutil.iter_modules([path]):
+            if is_pkg:
+                sub_path = path / module_name
+                sub_root = root + module_name + "."
+                module_names.extend(get_module_names(sub_path, sub_root))
+            else:
+                module_names.append(root + module_name)
+        return module_names
+
+    # Get the file that configure() was called from
+    file = Path(inspect.stack()[2].filename).parent
+    module_names = sorted(get_module_names(file))
+
+    # Get the base package. This includes bl_ext.repo in 4.2 and above
+    split = 3 if __package__.startswith("bl_ext.") else 1
+    base_package = ".".join(__package__.split(".")[:split])
+
+    all_modules = []
+    for name in module_names:
+        # Ignore self
+        if base_package + "." + name == __name__:
+            continue
+        # Import all files in module to load them.
+        all_modules.append(importlib.import_module("." + name, package=base_package))
+
+    # observe custom __reg_order__ parameter
+    all_modules.sort(key=lambda m: getattr(m, "__reg_order__", 100))
+    return all_modules
 
 
 # UTILS
@@ -113,7 +176,7 @@ class Cursor(Enum):
 
     @classmethod
     def set_location(cls, location: tuple):
-        bpy.context.window.cursor_warp(location[0], location[1])
+        bpy.context.window.cursor_warp(int(location[0]), int(location[1]))
 
 
 class ExecContext:
@@ -140,6 +203,9 @@ class ExecContext:
 class BDict(OrderedDict, MutableMapping[str, VT]):
     """Used to mimic the behavior of the built in Collection Properties in Blender, which act as a
     mix of dictionaries and lists."""
+
+    def get(*args, **kwargs) -> VT:
+        return super().get(*args, **kwargs)
 
     def __iter__(self) -> Iterator[VT]:
         return iter(self.values())
@@ -234,6 +300,14 @@ class BPoll:
 
 
 # TYPES
+class BRegister:
+    """A decorator used to register a class with `btypes`, without using a specific btypes decorator."""
+
+    def __call__(self, cls: T) -> T:
+        Config.register_list.append(cls)
+        return cls
+
+
 @dataclass
 class BMenu:
     """
@@ -290,6 +364,7 @@ class BMenu:
 
         Wrapped.__doc__ = panel_description
         Wrapped.__name__ = cls.__name__
+        Config.register_list.append(Wrapped)
         return Wrapped
 
 
@@ -432,6 +507,7 @@ class BPanel:
 
         Wrapped.__doc__ = panel_description
         Wrapped.__name__ = cls.__name__
+        Config.register_list.append(Wrapped)
         return Wrapped
 
 
@@ -486,15 +562,22 @@ class BPropertyGroupBase(PropertyGroup):
 
 
 class BPropertyGroup:
+    """
+    A decorator for extending the PropertyGroup type.
+
+    Args:
+        id_type: An ID type to register this group to (equivalent of setting a `PointerProperty` on that type).
+        name: The name to set the attribute on the ID type to be.
+    """
+
     type = BPropertyGroupBase
 
-    def __init__(self, id_type: ID, name: str):
+    def __init__(self, id_type: ID = None, name: str = ""):
         self.id_type = id_type
         self.name = name
 
     def __call__(self, cls: PropertyGroupClass) -> PropertyGroupClass:
         self.cls = cls
-        global property_groups
         property_groups.append(self)
 
         @wraps(cls, updated=())
@@ -502,17 +585,17 @@ class BPropertyGroup:
             pass
 
         self.wrapped_cls = Wrapped
+        Config.register_list.append(Wrapped)
         return self.wrapped_cls
 
     def _register(self):
-        try:
-            bpy.utils.register_class(self.wrapped_cls)
-        except ValueError:
-            pass
-        setattr(self.id_type, self.name, PointerProperty(type=self.wrapped_cls))
+        # Set Blender pointer property
+        if self.id_type:
+            setattr(self.id_type, self.name, PointerProperty(type=self.wrapped_cls))
 
     def _unregister(self):
-        delattr(self.id_type, self.name)
+        if self.id_type:
+            delattr(self.id_type, self.name)
 
 
 property_groups: list[BPropertyGroup] = []
@@ -851,7 +934,7 @@ class BOperator:
 
         Wrapped.__doc__ = op_description
         Wrapped.__name__ = cls.__name__
-
+        Config.register_list.append(Wrapped)
         return Wrapped
 
 
@@ -943,21 +1026,70 @@ class FunctionToOperator:
             CustomOperator.__annotations__[name] = prop
 
         # CustomOperator.__name__ = function.__name__
-        to_register.append(CustomOperator)
+        Config.register_list.append(CustomOperator)
         return function
 
 
-def register():
-    for op in to_register:
-        bpy.utils.register_class(op)
+def _get_dependencies():
+    """
+    Get a dictionary of each class and the classes that it depends on.
+    Currently this takes into account property groups, and their Pointer and Collection properties.
+    """
 
-    # property_groups.sort(key=get_depth, reverse=True)
+    # Get the direct children of each class
+    children = {}
+    for cls in Config.register_list:
+        if issubclass(cls, PropertyGroup):
+            children[cls] = set()
+            for name, value in typing.get_type_hints(cls, {}, {}).items():
+                if not isinstance(value, bpy.props._PropertyDeferred):
+                    continue
+                child = value.keywords.get("type")
+                if child is None:
+                    continue
+                children[cls].add(child)
+
+    dependencies = {}
+
+    def get_deps(cls):
+        """Recursively get the classes that have the given class as a child"""
+        deps = {c for c, child_list in children.items() if cls in child_list}
+        for dep in deps:
+            deps = deps.union(get_deps(dep))
+        return deps
+
+    for cls in Config.register_list:
+        dependencies[cls] = get_deps(cls)
+
+    return dependencies
+
+
+def register():
+    if Config.register:
+        # Sort classes so that they can register in the correct order without errors
+        dependencies = _get_dependencies()
+        Config.register_list.sort(key=lambda cls: len(dependencies[cls]), reverse=True)
+
+        for cls in Config.register_list:
+            bpy.utils.register_class(cls)
+
     for pgroup in property_groups:
         pgroup._register()
 
+    if Config.register:
+        for module in Config.all_modules:
+            if hasattr(module, "register"):
+                module.register()
+
 
 def unregister():
-    for op in to_register:
-        bpy.utils.unregister_class(op)
     for pgroup in property_groups:
         pgroup._unregister()
+
+    if Config.register:
+        for cls in Config.register_list:
+            bpy.utils.unregister_class(cls)
+
+        for module in Config.all_modules:
+            if hasattr(module, "unregister"):
+                module.unregister()
