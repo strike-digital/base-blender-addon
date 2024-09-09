@@ -13,21 +13,27 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Concatenate,
     Generic,
     Iterator,
     Literal,
     MutableMapping,
+    ParamSpec,
+    Self,
     TypeVar,
     Union,
 )
 
-from .bprops import BProperty
 import bpy
 from bpy.props import (
     BoolProperty,
+    BoolVectorProperty,
+    CollectionProperty,
+    EnumProperty,
     FloatProperty,
     FloatVectorProperty,
     IntProperty,
+    IntVectorProperty,
     PointerProperty,
     StringProperty,
 )
@@ -513,105 +519,6 @@ class BPanel:
         return Wrapped
 
 
-PropertyGroupClass = TypeVar("PropertyGroupClass", bound=PropertyGroup)
-
-
-class BPropertyGroupBase(PropertyGroup):
-
-    @property
-    def parent(self):
-        """Get the parent instance of this property group"""
-        try:
-            path = self.path_from_id()
-        except ValueError:
-            # The object has been removed
-            return None
-        parts = path.split(".")[:-1]
-        parent = self.id_data
-        for part in parts:
-            # Special case for collections that require indices to access
-            if "[" in part:
-                subparts = part.split("[")
-                index = subparts[1][:-1]
-                if index.replace("-", "").isdigit():
-                    index = int(index)
-                elif index.startswith('"') or index.startswith("'"):
-                    index = index[1:-1]
-                parent = getattr(parent, subparts[0])[index]
-                continue
-            parent = getattr(parent, part)
-        return parent
-
-    def copy_settings_to(self, other: PropertyGroup, recursive=False):
-        """Copy the attributes of this property group to another one."""
-        for name in self.keys():
-            attr = getattr(self, name)
-
-            # Special case for collection properties
-            if recursive and issubclass(type(attr), bpy_prop_collection):
-                other_collection = getattr(other, name)
-                for item in attr:
-                    other_item = other_collection.add()
-                    BPropertyGroupBase.copy_settings_to(item, other_item, recursive=recursive)
-                continue
-
-            # Copy attribute
-            try:
-                setattr(other, name, getattr(self, name))
-            except AttributeError as e:
-                print(e)
-                pass
-
-
-class BPropertyGroup:
-    """
-    A decorator for extending the PropertyGroup type.
-
-    Args:
-        id_type: An ID type to register this group to (equivalent of setting a `PointerProperty` on that type).
-        name: The name to set the attribute on the ID type to be.
-    """
-
-    type = BPropertyGroupBase
-
-    def __init__(self, id_type: ID = None, name: str = ""):
-        self.id_type = id_type
-        self.name = name
-
-    def __call__(self, cls: PropertyGroupClass) -> PropertyGroupClass:
-        self.cls = cls
-        property_groups.append(self)
-
-        @wraps(cls, updated=())
-        class Wrapped(cls, BPropertyGroupBase):
-            pass
-
-        # Copy class so that changes to this class don't affect the blender properties
-        return_cls = copy.copy(Wrapped)
-
-        # Convert properties created with the = sign to annotations for registration
-        for name, value in inspect.getmembers(Wrapped, lambda x: hasattr(x, "keywords") and hasattr(x, "function")):
-            Wrapped.__annotations__[name] = value
-            setattr(return_cls, name, BProperty(name))
-
-        Config.register_list.append(Wrapped)
-        self.wrapped_cls = Wrapped
-
-        return return_cls
-
-    def _register(self):
-        # Set Blender pointer property
-        if self.id_type:
-            setattr(self.id_type, self.name, PointerProperty(type=self.wrapped_cls))
-
-    def _unregister(self):
-        if self.id_type:
-            delattr(self.id_type, self.name)
-
-
-property_groups: list[BPropertyGroup] = []
-
-
 @dataclass
 class CustomPropertyType:
     """Placeholder used to identify a custom property on an operator."""
@@ -1039,6 +946,238 @@ class FunctionToOperator:
         # CustomOperator.__name__ = function.__name__
         Config.register_list.append(CustomOperator)
         return function
+
+
+# ------------------------------------------------------------------
+# PROPERTIES
+# ------------------------------------------------------------------
+
+
+"""
+This is my attempt at a method of defining Blender properties while maintaining useful type hinting.
+I have no idea if it's worth it, or if it's massive overkill, but it does make me feel better.
+
+Some notes:
+    - properties need to be defined using the "=" sign rather than the ":" sign
+      (this is because type hints aren't propagated through function calls)
+"""
+
+
+P = ParamSpec("P")
+R = TypeVar("R")  # The return type of the decorated function
+
+
+def override_prop_return(
+    fun: Callable[P, T]
+) -> Callable[[Callable[Concatenate[Callable[P, T], P], R]], Callable[P, R]]:
+    """This is some type magic that lets the decorated function inherit the type signature of another function.
+    It's pretty mind bending: https://github.com/python/mypy/issues/10574#issuecomment-1902246197.
+    I modified it to allow you to override the return type, allowing creating wrapper functions
+    that type hint a different return type to reality."""
+
+    def decorator(wrapper: Callable[Concatenate[Callable[P, T], P], R]) -> Callable[P, R]:
+
+        def decorated(*args: P.args, **kwargs: P.kwargs) -> T:
+            # add_file()
+            return fun(*args, **kwargs)
+
+        return decorated
+
+    return decorator
+
+
+class BProperty:
+    """
+    Used to interact with properties at runtime, for example drawing a property using the api:
+    ```
+    MyClass.my_prop.draw(layout, data, ...)
+    ```
+    """
+
+    def __init__(self, name: str):
+        self._name = name
+
+    def __repr__(self):
+        return f"BProperty('{self._name}')"
+
+    def draw(self, layout: UILayout, data, *args, **kwargs):
+        layout.prop(data, self._name, *args, **kwargs)
+
+
+@override_prop_return(StringProperty)
+def BStringProperty(*args, **kwargs) -> Union[str, BProperty]:
+    return StringProperty(*args, **kwargs)
+
+
+@override_prop_return(EnumProperty)
+def BEnumProperty(*args, **kwargs) -> Union[str, BProperty]:
+    return EnumProperty(*args, **kwargs)
+
+
+@override_prop_return(IntProperty)
+def BIntProperty(*args, **kwargs) -> Union[int, BProperty]:
+    return IntProperty(*args, **kwargs)
+
+
+@override_prop_return(IntVectorProperty)
+def BIntVectorProperty(*args, **kwargs) -> Union[list[int], BProperty]:
+    return IntVectorProperty(*args, **kwargs)
+
+
+@override_prop_return(BoolProperty)
+def BBoolProperty(*args, **kwargs) -> Union[bool, BProperty]:
+    return BoolProperty(*args, **kwargs)
+
+
+@override_prop_return(BoolVectorProperty)
+def BBoolVectorProperty(*args, **kwargs) -> Union[list[bool], BProperty]:
+    return BoolVectorProperty(*args, **kwargs)
+
+
+@override_prop_return(FloatProperty)
+def BFloatProperty(*args, **kwargs) -> Union[float, BProperty]:
+    return FloatProperty(*args, **kwargs)
+
+
+@override_prop_return(FloatVectorProperty)
+def BFloatVectorProperty(*args, **kwargs) -> Union[list[float], BProperty]:
+    return FloatVectorProperty(*args, **kwargs)
+
+
+@override_prop_return(CollectionProperty)
+def BCollectionProperty(*args, **kwargs) -> Union[bpy.types.bpy_prop_collection, BProperty]:
+    return CollectionProperty(*args, **kwargs)
+
+
+# Since the PointerProperty return type hint is dependent on its input arguments,
+# I implemented this one manually without using the decorator
+# I can't be bothered to add a docstring for it.
+def BPointerProperty(
+    type: T,
+    name: str = "",
+    description: str = "",
+    translation_context: str = "*",
+    options: set = {"ANIMATABLE"},
+    override: set = set(),
+    poll: Callable[[Self, Context], bool] = None,
+    update: Callable[[Self, Context], None] = None,
+) -> Union[T, BProperty]:
+    return PointerProperty(
+        type=type,
+        name=name,
+        description=description,
+        translation_context=translation_context,
+        options=options,
+        override=override,
+        poll=poll,
+        update=update,
+    )
+
+
+PropertyGroupClass = TypeVar("PropertyGroupClass", bound=PropertyGroup)
+
+
+class BPropertyGroupBase(PropertyGroup):
+
+    @property
+    def parent(self):
+        """Get the parent instance of this property group"""
+        try:
+            path = self.path_from_id()
+        except ValueError:
+            # The object has been removed
+            return None
+        parts = path.split(".")[:-1]
+        parent = self.id_data
+        for part in parts:
+            # Special case for collections that require indices to access
+            if "[" in part:
+                subparts = part.split("[")
+                index = subparts[1][:-1]
+                if index.replace("-", "").isdigit():
+                    index = int(index)
+                elif index.startswith('"') or index.startswith("'"):
+                    index = index[1:-1]
+                parent = getattr(parent, subparts[0])[index]
+                continue
+            parent = getattr(parent, part)
+        return parent
+
+    def copy_settings_to(self, other: PropertyGroup, recursive=False):
+        """Copy the attributes of this property group to another one."""
+        for name in self.keys():
+            attr = getattr(self, name)
+
+            # Special case for collection properties
+            if recursive and issubclass(type(attr), bpy_prop_collection):
+                other_collection = getattr(other, name)
+                for item in attr:
+                    other_item = other_collection.add()
+                    BPropertyGroupBase.copy_settings_to(item, other_item, recursive=recursive)
+                continue
+
+            # Copy attribute
+            try:
+                setattr(other, name, getattr(self, name))
+            except AttributeError as e:
+                print(e)
+                pass
+
+
+class BPropertyGroup:
+    """
+    A decorator for extending the PropertyGroup type.
+
+    Args:
+        id_type: An ID type to register this group to (equivalent of setting a `PointerProperty` on that type).
+        name: The name to set the attribute on the ID type to be.
+    """
+
+    type = BPropertyGroupBase
+
+    def __init__(self, id_type: ID = None, name: str = ""):
+        self.id_type = id_type
+        self.name = name
+
+    def __call__(self, cls: PropertyGroupClass) -> PropertyGroupClass:
+        self.cls = cls
+        property_groups.append(self)
+
+        @wraps(cls, updated=())
+        class Wrapped(cls, BPropertyGroupBase):
+            pass
+
+        # Here we need two versions of the class:
+        # One that is registered with all of the properties as annotations
+        # One that has actual values for the properties that can be used as an api, e.g. for drawing the property
+        # This is necessary because if we just change out the value in the original class, the blender property is
+        # overridden by the new value.
+        return_cls = copy.copy(Wrapped)
+
+        for name, value in inspect.getmembers(Wrapped, lambda x: hasattr(x, "keywords") and hasattr(x, "function")):
+            # Convert properties created with the = sign to annotations for registration
+            Wrapped.__annotations__[name] = value
+            # Set the value of the returned class to be a custom class so that it can be used to draw the property
+            # Using the syntax
+            # MyClass.my_prop.draw(...)
+            setattr(return_cls, name, BProperty(name))
+
+        Config.register_list.append(Wrapped)
+        self.wrapped_cls = Wrapped
+
+        return return_cls
+
+    def _register(self):
+        # Set Blender pointer property
+        if self.id_type:
+            setattr(self.id_type, self.name, PointerProperty(type=self.wrapped_cls))
+
+    def _unregister(self):
+        if self.id_type:
+            delattr(self.id_type, self.name)
+
+
+property_groups: list[BPropertyGroup] = []
 
 
 def _get_dependencies():

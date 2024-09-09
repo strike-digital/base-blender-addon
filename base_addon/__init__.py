@@ -24,8 +24,6 @@
 # }
 
 # from . import auto_load
-from time import perf_counter
-
 from .helpers import btypes
 
 btypes.configure(addon_string="test", auto_register=True)

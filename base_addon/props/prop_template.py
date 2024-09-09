@@ -1,8 +1,7 @@
 from bpy.props import BoolProperty
 from bpy.types import PropertyGroup, Scene
 
-from ..helpers.bprops import BBoolProperty, BStringProperty
-from ..helpers.btypes import BPropertyGroup
+from ..helpers.btypes import BBoolProperty, BPropertyGroup, BStringProperty
 
 
 @BPropertyGroup(Scene, "test_addon")
