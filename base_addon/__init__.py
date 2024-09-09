@@ -23,16 +23,15 @@
 #     "category": "3D View",
 # }
 
-from . import auto_load
+# from . import auto_load
 from .helpers import btypes
 
-btypes.configure(addon_string="test")
-auto_load.init()
+btypes.configure(addon_string="test", auto_register=True)
 
 
 def register():
-    auto_load.register()
+    btypes.register()
 
 
 def unregister():
-    auto_load.unregister()
+    btypes.unregister()
