@@ -1,3 +1,4 @@
+import copy
 import importlib
 import inspect
 import pkgutil
@@ -584,9 +585,18 @@ class BPropertyGroup:
         class Wrapped(cls, BPropertyGroupBase):
             pass
 
-        self.wrapped_cls = Wrapped
+        # Copy class so that changes to this class don't affect the blender properties
+        return_cls = copy.copy(Wrapped)
+
+        # Convert properties created with the = sign to annotations for registration
+        for name, value in inspect.getmembers(Wrapped, lambda x: hasattr(x, "keywords") and hasattr(x, "function")):
+            Wrapped.__annotations__[name] = value
+            setattr(return_cls, name, "hahasdklfjsdlkfj")
+
         Config.register_list.append(Wrapped)
-        return self.wrapped_cls
+        self.wrapped_cls = Wrapped
+
+        return return_cls
 
     def _register(self):
         # Set Blender pointer property
