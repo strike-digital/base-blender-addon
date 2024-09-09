@@ -13,7 +13,7 @@ from bpy.props import (
     PointerProperty,
     StringProperty,
 )
-from bpy.types import Context
+from bpy.types import Context, UILayout
 
 """
 This is my attempt at a method of defining Blender properties while maintaining useful type hinting.
@@ -65,8 +65,8 @@ class BProperty:
     def __repr__(self):
         return f"BProperty('{self._name}')"
 
-    def draw(self, layout, *args, **kwargs):
-        print(self._name, layout, args, kwargs)
+    def draw(self, layout: UILayout, data, *args, **kwargs):
+        layout.prop(data, self._name, *args, **kwargs)
 
 
 @override_prop_return(StringProperty)

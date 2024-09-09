@@ -12,11 +12,7 @@ class TestSettings(PropertyGroup):
 
     hoho = BBoolProperty("haha")
 
-    haha = BStringProperty()
-
-
-# print(TestSettings.haha)
-TestSettings.haha.draw("haha", "hoho")
+    dog = BStringProperty()
 
 
 def get_settings(context) -> TestSettings:
