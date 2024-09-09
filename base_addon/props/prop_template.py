@@ -15,8 +15,8 @@ class TestSettings(PropertyGroup):
     haha = BStringProperty()
 
 
-print(TestSettings.haha)
-# TestSettings.haha.draw("haha", "hoho")
+# print(TestSettings.haha)
+TestSettings.haha.draw("haha", "hoho")
 
 
 def get_settings(context) -> TestSettings:

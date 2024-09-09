@@ -1,4 +1,3 @@
-import inspect
 from typing import Callable, Concatenate, ParamSpec, Self, TypeVar, Union
 
 import bpy
@@ -57,10 +56,17 @@ def override_prop_return(
 #     """Add a file to the list for having BProperties converted into regular properties"""
 #     files.add(inspect.stack()[2].filename)
 
+
 class BProperty:
 
+    def __init__(self, name: str):
+        self._name = name
+
+    def __repr__(self):
+        return f"BProperty('{self._name}')"
+
     def draw(self, layout, *args, **kwargs):
-        print(layout, args, kwargs)
+        print(self._name, layout, args, kwargs)
 
 
 @override_prop_return(StringProperty)

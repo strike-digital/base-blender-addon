@@ -21,6 +21,7 @@ from typing import (
     Union,
 )
 
+from .bprops import BProperty
 import bpy
 from bpy.props import (
     BoolProperty,
@@ -591,7 +592,7 @@ class BPropertyGroup:
         # Convert properties created with the = sign to annotations for registration
         for name, value in inspect.getmembers(Wrapped, lambda x: hasattr(x, "keywords") and hasattr(x, "function")):
             Wrapped.__annotations__[name] = value
-            setattr(return_cls, name, "hahasdklfjsdlkfj")
+            setattr(return_cls, name, BProperty(name))
 
         Config.register_list.append(Wrapped)
         self.wrapped_cls = Wrapped
