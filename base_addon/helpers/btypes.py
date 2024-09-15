@@ -13,7 +13,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Concatenate,
     Generic,
     Iterator,
     Literal,
@@ -968,9 +967,7 @@ DecoratedParams = ParamSpec("DecoratedParams")  # The decorated function ParamSp
 DecoratedReturn = TypeVar("DecoratedReturn")  # The return type of the decorated function
 
 
-def override_prop_return(
-    bpy_property: Callable[BpyParams, BpyReturn]
-):
+def override_prop_return(bpy_property: Callable[BpyParams, BpyReturn]):
     """This is some type magic that lets the decorated function inherit the type signature of another function.
     It's pretty mind bending: https://github.com/python/mypy/issues/10574#issuecomment-1902246197.
     I modified it to allow you to override the return type, allowing creating wrapper functions
@@ -1007,6 +1004,7 @@ class BProperty:
 @override_prop_return(StringProperty)
 def BStringProperty(*args, **kwargs) -> Union[str, BProperty]:
     return StringProperty(*args, **kwargs)
+
 
 @override_prop_return(EnumProperty)
 def BEnumProperty(*args, **kwargs) -> Union[str, BProperty]:
@@ -1046,10 +1044,6 @@ def BFloatVectorProperty(*args, **kwargs) -> Union[list[float], BProperty]:
 @override_prop_return(CollectionProperty)
 def BCollectionProperty(*args, **kwargs) -> Union[bpy.types.bpy_prop_collection, BProperty]:
     return CollectionProperty(*args, **kwargs)
-
-
-def ho(a: Callable[BpyParams, DecoratedReturn]):
-    pass
 
 
 # Since the PointerProperty return type hint is dependent on its input arguments,
