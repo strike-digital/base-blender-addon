@@ -962,22 +962,24 @@ Some notes:
 """
 
 
-P = ParamSpec("P")
-R = TypeVar("R")  # The return type of the decorated function
+BpyParams = ParamSpec("BpyParams")  # The Blender property ParamSpec
+BpyReturn = TypeVar("BpyReturn")
+DecoratedParams = ParamSpec("DecoratedParams")  # The decorated function ParamSpec
+DecoratedReturn = TypeVar("DecoratedReturn")  # The return type of the decorated function
 
 
 def override_prop_return(
-    fun: Callable[P, T]
+    bpy_property: Callable[BpyParams, BpyReturn]
 ):
     """This is some type magic that lets the decorated function inherit the type signature of another function.
     It's pretty mind bending: https://github.com/python/mypy/issues/10574#issuecomment-1902246197.
     I modified it to allow you to override the return type, allowing creating wrapper functions
     that type hint a different return type to reality."""
 
-    def decorator(wrapper: Callable[P, R]) -> Callable[P, R]:
+    def decorator(wrapper: Callable[DecoratedParams, DecoratedReturn]) -> Callable[BpyParams, DecoratedReturn]:
 
-        def decorated(*args: P.args, **kwargs: P.kwargs) -> T:
-            return fun(*args, **kwargs)
+        def decorated(*args: BpyParams.args, **kwargs: BpyParams.kwargs) -> DecoratedReturn:
+            return bpy_property(*args, **kwargs)
 
         return decorated
 
@@ -1005,7 +1007,6 @@ class BProperty:
 @override_prop_return(StringProperty)
 def BStringProperty(*args, **kwargs) -> Union[str, BProperty]:
     return StringProperty(*args, **kwargs)
-
 
 @override_prop_return(EnumProperty)
 def BEnumProperty(*args, **kwargs) -> Union[str, BProperty]:
@@ -1047,7 +1048,7 @@ def BCollectionProperty(*args, **kwargs) -> Union[bpy.types.bpy_prop_collection,
     return CollectionProperty(*args, **kwargs)
 
 
-def ho(a: Callable[P, R]):
+def ho(a: Callable[BpyParams, DecoratedReturn]):
     pass
 
 
