@@ -784,7 +784,6 @@ class BOperator:
     else:
         type = Operator
 
-    # def __call__(decorator, cls: OperatorClass) -> Union[OperatorClass, BOperatorBase]:
     # The amount of time put into these type hints is not funny. And it looks so simple smh.
     def __call__(decorator, cls: T) -> Union[T, BOperatorBase[T]]:
         """This takes the decorated class and populate's the bl_ attributes with either the supplied values,
@@ -969,16 +968,15 @@ R = TypeVar("R")  # The return type of the decorated function
 
 def override_prop_return(
     fun: Callable[P, T]
-) -> Callable[[Callable[Concatenate[Callable[P, T], P], R]], Callable[P, R]]:
+):
     """This is some type magic that lets the decorated function inherit the type signature of another function.
     It's pretty mind bending: https://github.com/python/mypy/issues/10574#issuecomment-1902246197.
     I modified it to allow you to override the return type, allowing creating wrapper functions
     that type hint a different return type to reality."""
 
-    def decorator(wrapper: Callable[Concatenate[Callable[P, T], P], R]) -> Callable[P, R]:
+    def decorator(wrapper: Callable[P, R]) -> Callable[P, R]:
 
         def decorated(*args: P.args, **kwargs: P.kwargs) -> T:
-            # add_file()
             return fun(*args, **kwargs)
 
         return decorated
@@ -988,7 +986,7 @@ def override_prop_return(
 
 class BProperty:
     """
-    Used to interact with properties at runtime, for example drawing a property using the api:
+    Used to interact with properties at runtime, for example drawing a property using the syntax:
     ```
     MyClass.my_prop.draw(layout, data, ...)
     ```
@@ -1047,6 +1045,10 @@ def BFloatVectorProperty(*args, **kwargs) -> Union[list[float], BProperty]:
 @override_prop_return(CollectionProperty)
 def BCollectionProperty(*args, **kwargs) -> Union[bpy.types.bpy_prop_collection, BProperty]:
     return CollectionProperty(*args, **kwargs)
+
+
+def ho(a: Callable[P, R]):
+    pass
 
 
 # Since the PointerProperty return type hint is dependent on its input arguments,
