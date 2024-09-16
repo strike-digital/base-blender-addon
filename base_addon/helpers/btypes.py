@@ -962,7 +962,7 @@ Some notes:
 
 
 BpyParams = ParamSpec("BpyParams")  # The Blender property ParamSpec
-BpyReturn = TypeVar("BpyReturn")
+BpyReturn = TypeVar("BpyReturn")  # The return type of the Blender property
 DecoratedParams = ParamSpec("DecoratedParams")  # The decorated function ParamSpec
 DecoratedReturn = TypeVar("DecoratedReturn")  # The return type of the decorated function
 
