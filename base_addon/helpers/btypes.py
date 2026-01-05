@@ -43,6 +43,7 @@ from bpy.types import (
     Event,
     Material,
     Menu,
+    Node,
     NodeTree,
     Object,
     Operator,
@@ -375,6 +376,15 @@ class BMenu:
         return Wrapped
 
 
+class BPanelBase(Panel):
+    """The base operator class used by the @BPanel decorator."""
+
+    # For some reason we don't get type checking for the layout unless defining it in the init function
+    if TYPE_CHECKING:
+        def __init__(self):
+            self.layout: UILayout
+
+
 @dataclass
 class BPanel:
     """
@@ -459,7 +469,7 @@ class BPanel:
     default_closed: bool = False
     header_button_expand: bool = False
 
-    type = Panel
+    type = BPanelBase
 
     def __call__(self, cls):
         """This takes the decorated class and populate's the bl_ attributes with either the supplied values,
@@ -488,7 +498,7 @@ class BPanel:
             options = options.union(cls.bl_options)
 
         @wraps(cls, updated=())
-        class Wrapped(cls, Panel):
+        class Wrapped(cls, BPanelBase):
             bl_idname = idname
             bl_label = label
             bl_options = options
@@ -752,6 +762,7 @@ class BOperator:
         undo (bool): Whether to push an undo step after the operator is executed.
         undo_grouped (bool): Whether to group multiple consecutive executions of the operator into one undo step.
         internal (bool): Whether the operator is only used internally and should not be shown in menu search
+        modal_priority (bool): Handle events before other modal operators without this option.
             (doesn't affect the operator search accessible when developer extras is enabled).
         wrap_cursor (bool): Whether to wrap the cursor to the other side of the region when it goes outside of it.
         wrap_cursor_x (bool): Only wrap the cursor in the horizontal (x) direction.
@@ -770,6 +781,7 @@ class BOperator:
     undo: bool = False
     undo_grouped: bool = False
     internal: bool = False
+    modal_priority: bool = False
     wrap_cursor: bool = False
     wrap_cursor_x: bool = False
     wrap_cursor_y: bool = False
@@ -816,6 +828,7 @@ class BOperator:
             "REGISTER": decorator.register,
             "UNDO": decorator.undo,
             "UNDO_GROUPED": decorator.undo_grouped,
+            "MODAL_PRIORITY": decorator.modal_priority,
             "GRAB_CURSOR": decorator.wrap_cursor,
             "GRAB_CURSOR_X": decorator.wrap_cursor_x,
             "GRAB_CURSOR_Y": decorator.wrap_cursor_y,
@@ -1046,6 +1059,9 @@ def BCollectionProperty(*args, **kwargs) -> Union[bpy.types.bpy_prop_collection,
     return CollectionProperty(*args, **kwargs)
 
 
+# @override_prop_return(PointerProperty)
+# def BPointerProperty(*args, **kwargs) -> Union[BProperty]:
+#     return PointerProperty(*args, **kwargs)
 # Since the PointerProperty return type hint is dependent on its input arguments,
 # I implemented this one manually without using the decorator
 # I can't be bothered to add a docstring for it.
@@ -1074,7 +1090,7 @@ def BPointerProperty(
 PropertyGroupClass = TypeVar("PropertyGroupClass", bound=PropertyGroup)
 
 
-class BPropertyGroupBase(PropertyGroup):
+class BPropertyGroupBase(PropertyGroup, bpy_struct):
 
     @property
     def parent(self):
@@ -1136,6 +1152,32 @@ class BPropertyGroup:
         self.id_type = id_type
         self.name = name
 
+    @staticmethod
+    def resolve_property_group_props(wrapped_cls):
+        """Convert the BProperty syntax to Blender annotations.
+        This is a separate method so it can be used by all class that can hold properties.
+
+        Returns:
+            wrapped_cls: The class that will be registered
+            return_cls: The class to be returned by the decorator"""
+        # Here we need two versions of the class:
+        # One that is registered with all of the properties as annotations
+        # One that has actual values for the properties that can be used as an api, e.g. for drawing the property
+        # This is necessary because if we just change out the value in the original class, the blender property is
+        # overridden by the new value.
+        return_cls = copy.copy(wrapped_cls)
+
+        for name, value in inspect.getmembers(wrapped_cls, lambda x: hasattr(x, "keywords") and hasattr(x, "function")):
+            # Convert properties created with the = sign to annotations for registration
+            wrapped_cls.__annotations__[name] = value
+            # Set the value of the returned class to be a custom class so that it can be used to draw the property
+            # Using the syntax
+            # MyClass.my_prop.draw(...)
+            setattr(return_cls, name, BProperty(name))
+
+        Config.register_list.append(wrapped_cls)
+        return wrapped_cls, return_cls
+
     def __call__(self, cls: PropertyGroupClass) -> PropertyGroupClass:
         self.cls = cls
         property_groups.append(self)
@@ -1144,23 +1186,7 @@ class BPropertyGroup:
         class Wrapped(cls, BPropertyGroupBase):
             pass
 
-        # Here we need two versions of the class:
-        # One that is registered with all of the properties as annotations
-        # One that has actual values for the properties that can be used as an api, e.g. for drawing the property
-        # This is necessary because if we just change out the value in the original class, the blender property is
-        # overridden by the new value.
-        return_cls = copy.copy(Wrapped)
-
-        for name, value in inspect.getmembers(Wrapped, lambda x: hasattr(x, "keywords") and hasattr(x, "function")):
-            # Convert properties created with the = sign to annotations for registration
-            Wrapped.__annotations__[name] = value
-            # Set the value of the returned class to be a custom class so that it can be used to draw the property
-            # Using the syntax
-            # MyClass.my_prop.draw(...)
-            setattr(return_cls, name, BProperty(name))
-
-        Config.register_list.append(Wrapped)
-        self.wrapped_cls = Wrapped
+        self.wrapped_cls, return_cls = self.resolve_property_group_props(Wrapped)
 
         return return_cls
 
@@ -1175,6 +1201,75 @@ class BPropertyGroup:
 
 
 property_groups: list[BPropertyGroup] = []
+
+
+# -----------------------------------------------------------------
+# NODE TREES
+# -----------------------------------------------------------------
+
+
+class BNodeTreeBase(NodeTree):
+    pass
+
+
+@dataclass
+class BNodeTree:
+    idname: str = ""
+    label: str = ""
+    icon: str = ""
+
+    if TYPE_CHECKING:
+        type = BNodeTreeBase
+        "Inherit from this to get proper auto complete for the extra attributes and functions"
+    else:
+        type = NodeTree
+
+    def __call__(decorator, cls: T) -> Union[T, BNodeTreeBase]:
+        idname = decorator.idname or cls.__name__
+        label = decorator.label or idname
+        icon = decorator.icon or "X"
+
+        @wraps(cls, updated=())
+        class Wrapped(BNodeTreeBase, cls, NodeTree):
+            bl_idname = idname
+            bl_label = label
+            bl_icon = icon
+
+        _, return_cls = BPropertyGroup.resolve_property_group_props(Wrapped)
+
+        # Config.register_list.append(Wrapped)
+        return return_cls
+
+
+class BNodeBase(Node):
+    pass
+
+
+@dataclass
+class BNode:
+    idname: str = ""
+    label: str = ""
+    icon: str = ""
+
+    if TYPE_CHECKING:
+        type = BNodeBase
+        "Inherit from this to get proper auto complete for the extra attributes and functions"
+    else:
+        type = Node
+
+    def __call__(decorator, cls: T) -> Union[T, BNodeBase]:
+        idname = decorator.idname or cls.__name__
+        label = decorator.label or idname
+        icon = decorator.icon or "X"
+
+        @wraps(cls, updated=())
+        class Wrapped(BNodeBase, cls, Node):
+            bl_idname = idname
+            bl_label = label
+            bl_icon = icon
+
+        Config.register_list.append(Wrapped)
+        return Wrapped
 
 
 def _get_dependencies():
